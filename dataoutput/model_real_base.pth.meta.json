@@ -1,0 +1,26 @@
+{
+  "mat_class_map": {
+    "UAV": 0,
+    "bird": 1,
+    "helicopter": 2,
+    "passenger ship": 3,
+    "rotary drone": 4,
+    "speedboat": 5
+  },
+  "mat_target_points": 32,
+  "num_classes": 6,
+  "input_size": [
+    384,
+    384
+  ],
+  "class_balance": true,
+  "class_weights_used": [
+    0.8845208883285522,
+    0.6191646456718445,
+    1.0319410562515259,
+    1.547911524772644,
+    0.8845208883285522,
+    1.0319410562515259
+  ],
+  "class_weight_mode": "balanced"
+}
