@@ -49,7 +49,7 @@ project_data/
       *.mat
     类别B/
       *.mat
-  mat_test/                  # 给 evaluate.py / robust_evaluate.py / whitebox_attacks.py 等
+  mat_test/                  # 给 evaluate.py / robust_evaluate.py / whitebox_attacks.py / blackbox_attacks.py 等
     类别A/
       *.mat
     类别B/
@@ -57,7 +57,7 @@ project_data/
 ```
 
 **不要把测试用 `.mat` 放进 `mat_train/`。**  
-`whitebox_attacks.py` 与 `evaluate.py` 一样使用**测试目录**（`--mat_test_dir` / `--mat_dir`），并从与权重同名的 **`*.pth.meta.json`** 读取 `mat_target_points`（若存在），否则默认重采样长度 **32**。
+`whitebox_attacks.py`、`blackbox_attacks.py` 与 `evaluate.py` 一样使用**测试目录**（`--mat_test_dir` / `--mat_dir`），并从与权重同名的 **`*.pth.meta.json`** 读取 `mat_target_points`（若存在），否则默认重采样长度 **32**。
 
 ---
 
@@ -74,7 +74,7 @@ pip install -r requirements.txt
 
 ## GPU
 
-`train.py`、`evaluate.py`、`robust_evaluate.py`、`whitebox_attacks.py` 默认 **`--device cuda`**；无 CUDA 时回退 CPU 并警告。  
+`train.py`、`evaluate.py`、`robust_evaluate.py`、`whitebox_attacks.py`、`blackbox_attacks.py` 默认 **`--device cuda`**；无 CUDA 时回退 CPU 并警告。  
 强制必须有 GPU：`--require_gpu`。只用 CPU：`--device cpu`。
 
 ---
@@ -342,6 +342,84 @@ python whitebox_attacks.py --model_path dataoutput/model_aug_transformer.pth --m
 
 ---
 
+## 鲁棒性：黑盒对抗攻击评估（PyTorch）
+
+脚本：`blackbox_attacks.py`。在**测试集 MAT**（`--mat_test_dir` 或 `--mat_dir`）上对**目标模型**做查询式黑盒攻击，实现三种策略（与脚本顶部说明一致）：
+
+| `--attack` | 方法 | 说明 |
+|------------|------|------|
+| `square` | Square Attack | 基于 margin 分数的 L∞ 黑盒攻击，查询效率较高（**推荐首选**） |
+| `nes` | NES-PGD | 用 Natural Evolution Strategies 估计梯度，再做 PGD 风格更新 |
+| `transfer` | Transfer | 在**随机初始化**的替代模型上做白盒 PGD，将扰动迁移到目标模型 |
+| `all` | 全部 | 依次运行 `square` → `nes` → `transfer`，分别打印一套指标 |
+
+**路径**：`--model_path`、`--mat_test_dir` 须为**本机真实路径**；不能使用 `...` 等占位符（脚本会校验并报错）。权重文件须存在（例如 `dataoutput/model_transformer.pth`）；若你训练时用的 `--save_path` 是别的名字，这里要改成对应的 `dataoutput/xxx.pth`。  
+**数据与长度**：与 `evaluate.py` 相同目录约定；从 `*.pth.meta.json` 读取 `mat_target_points`，缺省为 **32**。
+
+### 扰动与评估逻辑（与白盒脚本对齐的部分）
+
+- **`--max_rel_change`**：相对 L∞ 盒约束，语义与 `noise_perturbation.project_relative_change` 及 `whitebox_attacks.py` 一致；默认脚本内为 **0.20**（黑盒实验常用较松预算）。
+- **`--no_rel_budget`**：不做相对投影，用于对比实验。
+- **`--budget_floor`**：投影时的 `min_scale`，默认 **0.01**。
+- **`--clamp_min` / `--clamp_max`**：需**成对**指定，攻击后对输入做硬截断。
+- **`--attack-clean-only` / `--no-attack-clean-only`**：默认仅对「干净预测正确」的样本攻击；**攻击成功率（ISR）** 等指标的分母与 `whitebox_attacks.py` 含义一致。
+- 每种攻击在 untargeted 之外，会对 **`--targeted_topk`** 个候选目标类做 targeted，并保留更强结果。**`--attack_restarts`** 仅作用于 **Square / NES** 的外层随机重启；**Transfer** 外层固定 **1** 轮，替代模型上的 PGD 重启由 **`--tr_restarts`** 控制。
+
+### 推荐命令示例
+
+**Shell 说明**：下面 **Bash** 代码块里行尾的 **`\`** 只在 **Git Bash / WSL / Linux / macOS** 下表示续行。**Windows PowerShell** 里 **`\` 不是续行符**，整段粘贴会把 `--model_path` 等当成非法表达式并报错。PowerShell 请用 **「Windows PowerShell」** 的一行命令，或把每行行尾改成 **反引号 `` ` ``** 再续行（最后一行不要加反引号）。**不要把「选项」和「参数值」拆开两行**（例如 `--targeted_topk` 与 `5` 必须在同一行）；若在 `--targeted_topk` 后误按了回车，会出现续行提示 **`>>`**，此时 Python 往往还没正常跑起来，**按 Ctrl+C** 退出后重输整行。命令正确时，Square 攻击会先做设备/模型加载，再根据数据量与查询预算**运行较久**才有最终指标输出。
+
+**最强配置（Square，相对扰动预算约 20%，查询预算放宽）**
+
+```bash
+python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test_augmented --attack square --max_rel_change 0.20 --sq_max_queries 5000 --attack_restarts 3 --targeted_topk 5
+```
+
+**Windows PowerShell（整行复制，勿在 `--targeted_topk` 与 `5` 之间换行）**
+
+```powershell
+python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test --attack square --max_rel_change 0.20 --sq_max_queries 5000 --attack_restarts 3 --targeted_topk 5
+```
+
+将 `project_data/mat_test` 换为你本机测试集根目录（按类别子文件夹组织，与训练目录结构相同）。
+
+**三种黑盒方法全跑对比**
+
+```bash
+python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test --attack all --max_rel_change 0.20 --batch_size 64
+```
+
+**Windows PowerShell（单行）**
+
+```powershell
+python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test --attack all --max_rel_change 0.20 --batch_size 64
+```
+
+Square / NES 查询与迭代量大，**`--batch_size`** 默认 **64**（可用 `32`～`128` 按显存调整）。`--attack all` 时三种方法共用同一 loader，总耗时主要取决于 Square 与 NES。
+
+### 常用 CLI 参数（完整列表见 `python blackbox_attacks.py --help`）
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--attack` | `all` | `square` / `nes` / `transfer` / `all` |
+| `--batch_size` | `64` | 批大小，黑盒前向次数多，可适当减小 |
+| `--max_rel_change` | `0.20` | 相对 L∞ 预算 |
+| `--sq_max_queries` | `5000` | Square 每样本最大查询轮次上限 |
+| `--sq_p_init` | `0.8` | Square 初始窗口占序列长度比例 |
+| `--attack_restarts` | `3` | Square / NES 外层重启次数（Transfer 不用此项） |
+| `--tr_restarts` | `5` | Transfer：替代模型 PGD 重启次数 |
+| `--targeted_topk` | `5` | targeted 候选类数 |
+| `--nes_samples` | `20` | NES 每步采样对数（查询约 ∝ `2 * nes_samples * nes_steps`） |
+| `--nes_steps` | `100` | NES 迭代步数 |
+| `--nes_sigma` / `--nes_step_size` / `--nes_momentum` | `0.01` / `0.3` / `0.9` | NES 噪声尺度、步长、动量 |
+| `--tr_pgd_steps` / `--tr_pgd_step_size` / `--tr_momentum` | `200` / `0.3` / `0.9` | Transfer：替代模型 PGD 步数、步长系数、动量 |
+
+### 输出指标（终端）
+
+每种攻击结束会打印：攻击成功率（ISR）、平均查询轮次、干净/攻击后准确率、mAP、Target Recall（macro）、平均相对扰动与 L2 距离、SSIM、PSNR、Restart 成功率均值/标准差、失真度与已攻击样本占比等（与 `blackbox_attacks.py` 中 `_print_result` 一致）。
+
+---
+
 ## 主要文件
 
 | 文件 | 作用 |
@@ -349,6 +427,7 @@ python whitebox_attacks.py --model_path dataoutput/model_aug_transformer.pth --m
 | `train.py` | 训练 Transformer（仅 MAT） |
 | `evaluate.py` | 测试集准确率（仅 MAT） |
 | `whitebox_attacks.py` | 白盒攻击与评估（FGSM / PGD / CW-L2 / DeepFool） |
+| `blackbox_attacks.py` | 黑盒攻击与评估（Square / NES-PGD / Transfer） |
 | `mat_loader.py` | 读取 v7.3 `.mat` → `TrackSample`（12 列主序列） |
 | `data_utils.py` | `TrackSample`、`TRACK_CHANNEL_KEYS`、多通道预处理、时序批处理 |
 | `model.py` | `RadarTrackTransformer`（含位置编码 + TransformerEncoder） |
@@ -374,5 +453,5 @@ python whitebox_attacks.py --model_path dataoutput/model_aug_transformer.pth --m
 - 多分类至少需要 **2 个类别文件夹**。  
 - 训练与测试目录**文件不要交叉**，避免信息泄漏。  
 - 类别文件夹名会写入 `meta.json`；测试集**子文件夹名称**应与训练时一致，以保证标签编号一致。  
-- **`whitebox_attacks.py`** 与 **`evaluate.py`** 共用同一套 MAT 目录约定；攻击前会先做干净前向，仅对子集做对抗（默认仅 clean-correct）。  
+- **`whitebox_attacks.py`**、**`blackbox_attacks.py`** 与 **`evaluate.py`** 共用同一套 MAT 目录约定；攻击前会先做干净前向，仅对子集做对抗（默认仅 clean-correct）。  
 - 若曾使用**仅三通道**的旧模型权重，其 `input_size` 与当前 **12 通道** 流程不一致，需**重新训练**后再评估。
