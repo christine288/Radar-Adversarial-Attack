@@ -39,7 +39,7 @@ def relative_change_stats(
     x_ref: torch.Tensor,
     x_adv: torch.Tensor,
     eps: float = 1e-6,
-    min_scale: float = 0.0,
+    min_scale: float = 0.01,
 ) -> dict[str, float]:
     """
     Return mean/max relative absolute change for reporting.

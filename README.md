@@ -369,19 +369,28 @@ python whitebox_attacks.py --model_path dataoutput/model_aug_transformer.pth --m
 
 **Shell 说明**：下面 **Bash** 代码块里行尾的 **`\`** 只在 **Git Bash / WSL / Linux / macOS** 下表示续行。**Windows PowerShell** 里 **`\` 不是续行符**，整段粘贴会把 `--model_path` 等当成非法表达式并报错。PowerShell 请用 **「Windows PowerShell」** 的一行命令，或把每行行尾改成 **反引号 `` ` ``** 再续行（最后一行不要加反引号）。**不要把「选项」和「参数值」拆开两行**（例如 `--targeted_topk` 与 `5` 必须在同一行）；若在 `--targeted_topk` 后误按了回车，会出现续行提示 **`>>`**，此时 Python 往往还没正常跑起来，**按 Ctrl+C** 退出后重输整行。命令正确时，Square 攻击会先做设备/模型加载，再根据数据量与查询预算**运行较久**才有最终指标输出。
 
-**最强配置（Square，相对扰动预算约 20%，查询预算放宽）**
+**Square**
 
 ```bash
-python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test_augmented --attack square --max_rel_change 0.20 --sq_max_queries 5000 --attack_restarts 3 --targeted_topk 5
+python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test_augmented --attack square --max_rel_change 0.05 --sq_max_queries 5000 --attack_restarts 1 --targeted_topk 2
 ```
 
-**Windows PowerShell（整行复制，勿在 `--targeted_topk` 与 `5` 之间换行）**
+**减少查询次数2000**
 
-```powershell
-python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test --attack square --max_rel_change 0.20 --sq_max_queries 5000 --attack_restarts 3 --targeted_topk 5
+```bash
+python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test_augmented --attack square --max_rel_change 0.05 --sq_max_queries 2000 --attack_restarts 1 --targeted_topk 1
 ```
 
-将 `project_data/mat_test` 换为你本机测试集根目录（按类别子文件夹组织，与训练目录结构相同）。
+**NES-PGD：**
+
+```bash
+python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test_augmented --attack nes --max_rel_change 0.05 --nes_steps 100 --nes_samples 20 --nes_sigma 0.01 --nes_step_size 0.3 --attack_restarts 1 --targeted_topk 2```
+
+**Transfer Attack：**
+
+```bash
+python blackbox_attacks.py --model_path dataoutput/model_transformer.pth --mat_test_dir project_data/mat_test_augmented --attack square --max_rel_change 0.05 --sq_max_queries 2000 --attack_restarts 1 --targeted_topk 1
+```
 
 **三种黑盒方法全跑对比**
 
