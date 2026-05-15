@@ -230,7 +230,7 @@ def fgsm_attack(
     max_rel_change: Optional[float] = 0.05,
     budget_floor: float = 0.0,
     clamp: Optional[Tuple[float, float]] = None,
-    loss_mode: str = "margin",
+    loss_mode: str = "ce",
 ) -> AttackResult:
     """Single-step FGSM under the project's relative change constraint."""
     model.eval()
