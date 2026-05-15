@@ -1,7 +1,7 @@
 """Black-box adversarial attacks and evaluation CLI for radar track classification.
 
 Implements three black-box attack strategies:
-  - Square Attack  : score-based, L-inf, highly query-efficient (推荐首选)
+  - Square Attack  : score-based, L-inf, highly query-efficient
   - NES-PGD        : gradient-estimation via Natural Evolution Strategies
   - Transfer Attack : surrogate-model white-box → target-model transfer
 
@@ -47,10 +47,6 @@ from noise_perturbation import (
     relative_change_stats,
 )
 
-# ---------------------------------------------------------------------------
-# 通用数据结构
-# ---------------------------------------------------------------------------
-
 
 @dataclass
 class BlackboxResult:
@@ -62,11 +58,6 @@ class BlackboxResult:
     mean_rel_change: float
     max_rel_change: float
     queries_per_sample: torch.Tensor       # shape (B,), 每个样本实际用掉的查询轮次
-
-
-# ---------------------------------------------------------------------------
-# 通用工具
-# ---------------------------------------------------------------------------
 
 
 def _relative_budget_tensor(
@@ -129,12 +120,6 @@ def _score_fn(
         masked[torch.arange(B), y] = -1.0
         best_other = masked.max(dim=1).values
         return sel - best_other          # untargeted: 希望 < 0 → 攻击让 sel 最小
-
-
-# ---------------------------------------------------------------------------
-# 1. Square Attack (L-inf, score-based)
-#    参考: Andriushchenko et al., "Square Attack", ECCV 2020
-# ---------------------------------------------------------------------------
 
 
 def _square_attack_init(
@@ -262,12 +247,6 @@ def square_attack(
     return _finalize(model, x_ref, x_adv, queries)
 
 
-# ---------------------------------------------------------------------------
-# 2. NES-PGD (Natural Evolution Strategies gradient estimation)
-#    参考: Ilyas et al., "Black-box Adversarial Attacks with Limited Queries", ICML 2018
-# ---------------------------------------------------------------------------
-
-
 def nes_pgd_attack(
     model: torch.nn.Module,
     x: torch.Tensor,
@@ -348,14 +327,6 @@ def nes_pgd_attack(
             break
 
     return _finalize(model, x_ref, x_adv, queries)
-
-
-# ---------------------------------------------------------------------------
-# 3. Transfer Attack (surrogate model → target model)
-#    用与目标模型相同架构但独立初始化的替代模型，在替代模型上做 PGD，
-#    再直接迁移到目标模型评估。
-# ---------------------------------------------------------------------------
-
 
 def _build_surrogate(
     input_size: Tuple[int, int],
@@ -491,11 +462,6 @@ def transfer_attack(
     )
     queries = torch.zeros(B, dtype=torch.float32)   # 目标模型查询次数 = 0
     return _finalize(model, x_ref, x_adv, queries)
-
-
-# ---------------------------------------------------------------------------
-# 评估主循环
-# ---------------------------------------------------------------------------
 
 
 def _compute_metrics(
@@ -838,12 +804,6 @@ def evaluate_blackbox_attack(
         "total_samples": total_samples,
     }
 
-
-# ---------------------------------------------------------------------------
-# 模型加载 / DataLoader
-# ---------------------------------------------------------------------------
-
-
 def load_model(model_path: str, device: str) -> RadarTrackTransformer:
     try:
         try:
@@ -868,11 +828,6 @@ def build_loader(samples: List[TrackSample], batch_size: int) -> DataLoader:
     x, y = batch_tracks_to_sequences(samples)
     ds = TensorDataset(torch.from_numpy(x), torch.from_numpy(y))
     return DataLoader(ds, batch_size=batch_size, shuffle=False)
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 def _print_result(name: str, r: Dict[str, float]) -> None:
