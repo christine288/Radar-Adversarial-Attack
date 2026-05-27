@@ -3,8 +3,9 @@
 import argparse
 import json
 from pathlib import Path
-from typing import List
+from typing import Any
 from typing import Dict
+from typing import List
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -103,7 +104,8 @@ def evaluate_model(
     device: str = "cpu",
     mat_test_dir: str = "",
     show_confusion: bool = False,
-) -> None:
+    return_predictions: bool = False,
+) -> Any:
     try:
         checkpoint = torch.load(model_path, map_location=device, weights_only=True)
     except TypeError:
@@ -170,6 +172,10 @@ def evaluate_model(
     if show_confusion:
         names = _class_names_from_meta(meta, num_classes)
         print_confusion_and_report(y_true, y_pred, num_classes, names)
+
+    if return_predictions:
+        return {"metrics": metrics, "y_true": y_true, "y_pred": y_pred}
+    return metrics
 
 
 def main():
