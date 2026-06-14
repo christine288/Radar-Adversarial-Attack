@@ -21,7 +21,7 @@ from data_utils import TrackSample, batch_tracks_to_sequences
 from device_utils import print_device_banner, resolve_device_str
 from metrics_utils import compute_multiclass_map
 from metrics_utils import format_pct
-from model import RadarTrackTransformer
+from model_service import load_radar_transformer_model
 
 
 def build_test_loader(samples: List[TrackSample], batch_size: int = 200) -> DataLoader:
@@ -105,18 +105,10 @@ def evaluate_model(
     mat_test_dir: str = "",
     show_confusion: bool = False,
     return_predictions: bool = False,
+    verbose: bool = True,
 ) -> Any:
-    try:
-        checkpoint = torch.load(model_path, map_location=device, weights_only=True)
-    except TypeError:
-        checkpoint = torch.load(model_path, map_location=device)
-    input_size = checkpoint["input_size"]
-    num_classes = checkpoint.get("num_classes", 6)
-
-    model = RadarTrackTransformer(input_size=input_size, num_classes=num_classes)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.to(device)
-    model.eval()
+    model = load_radar_transformer_model(model_path, device=device)
+    num_classes = int(model.head[-1].out_features)
 
     if not mat_test_dir:
         raise ValueError("必须提供 --mat_test_dir 或 --mat_dir（仅测试集目录）")
@@ -148,27 +140,28 @@ def evaluate_model(
             y_score.extend(probs.cpu().numpy().tolist())
 
     metrics = compute_metrics_from_preds(y_true, y_pred, y_score, num_classes=num_classes)
-    print(
-        "测试集有效性指标: "
-        f"Acc(准确率)={metrics['accuracy']:.4f}, "
-        f"P_macro(宏平均精确率)={metrics['precision_macro']:.4f}, "
-        f"R_macro(宏平均召回率)={metrics['recall_macro']:.4f}, "
-        f"F1_macro(宏平均F1)={metrics['f1_macro']:.4f}, "
-        f"P_micro(微平均精确率)={metrics['precision_micro']:.4f}, "
-        f"R_micro(微平均召回率)={metrics['recall_micro']:.4f}, "
-        f"F1_micro(微平均F1)={metrics['f1_micro']:.4f}"
-    )
-    print(
-        "测试集百分比指标: "
-        f"Acc={format_pct(metrics['accuracy'])}, "
-        f"mAP={format_pct(metrics['mAP'])}, "
-        f"P_macro={format_pct(metrics['precision_macro'])}, "
-        f"R_macro={format_pct(metrics['recall_macro'])}, "
-        f"F1_macro={format_pct(metrics['f1_macro'])}, "
-        f"P_micro={format_pct(metrics['precision_micro'])}, "
-        f"R_micro={format_pct(metrics['recall_micro'])}, "
-        f"F1_micro={format_pct(metrics['f1_micro'])}"
-    )
+    if verbose:
+        print(
+            "测试集有效性指标: "
+            f"Acc(准确率)={metrics['accuracy']:.4f}, "
+            f"P_macro(宏平均精确率)={metrics['precision_macro']:.4f}, "
+            f"R_macro(宏平均召回率)={metrics['recall_macro']:.4f}, "
+            f"F1_macro(宏平均F1)={metrics['f1_macro']:.4f}, "
+            f"P_micro(微平均精确率)={metrics['precision_micro']:.4f}, "
+            f"R_micro(微平均召回率)={metrics['recall_micro']:.4f}, "
+            f"F1_micro(微平均F1)={metrics['f1_micro']:.4f}"
+        )
+        print(
+            "测试集百分比指标: "
+            f"Acc={format_pct(metrics['accuracy'])}, "
+            f"mAP={format_pct(metrics['mAP'])}, "
+            f"P_macro={format_pct(metrics['precision_macro'])}, "
+            f"R_macro={format_pct(metrics['recall_macro'])}, "
+            f"F1_macro={format_pct(metrics['f1_macro'])}, "
+            f"P_micro={format_pct(metrics['precision_micro'])}, "
+            f"R_micro={format_pct(metrics['recall_micro'])}, "
+            f"F1_micro={format_pct(metrics['f1_micro'])}"
+        )
     if show_confusion:
         names = _class_names_from_meta(meta, num_classes)
         print_confusion_and_report(y_true, y_pred, num_classes, names)

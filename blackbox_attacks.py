@@ -874,7 +874,7 @@ def main() -> None:
                         help="同 --mat_test_dir（兼容旧参数）")
     parser.add_argument("--attack", type=str, default="all",
                         choices=["all", "square", "nes", "transfer"])
-    parser.add_argument("--max_rel_change", type=float, default=0.20,
+    parser.add_argument("--max_rel_change", type=float, default=0.05,
                         help="相对 L∞ 预算（建议黑盒使用 0.20）")
     parser.add_argument("--no_rel_budget", action="store_true",
                         help="不做相对 L∞ 投影（无约束上界测试）")
@@ -883,12 +883,12 @@ def main() -> None:
     parser.add_argument("--clamp_max", type=float, default=None)
     parser.add_argument("--attack_clean_only", action=argparse.BooleanOptionalAction,
                         default=True)
-    parser.add_argument("--targeted_topk", type=int, default=5,
+    parser.add_argument("--targeted_topk", type=int, default=1,
                         help="尝试 top-k 目标类并保留最强结果")
-    parser.add_argument("--attack_restarts", type=int, default=3,
+    parser.add_argument("--attack_restarts", type=int, default=1,
                         help="Square/NES 重启次数（Transfer 固定=1）")
     # Square Attack
-    parser.add_argument("--sq_max_queries", type=int, default=5000)
+    parser.add_argument("--sq_max_queries", type=int, default=2000)
     parser.add_argument("--sq_p_init", type=float, default=0.8,
                         help="Square Attack 初始窗口比例（0~1 相对序列长度）")
     # NES

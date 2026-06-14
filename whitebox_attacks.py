@@ -22,6 +22,7 @@ from metrics_utils import compute_multiclass_map
 from metrics_utils import compute_signal_quality_metrics
 from metrics_utils import format_pct
 from model import RadarTrackTransformer
+from model_service import load_radar_transformer_model
 from noise_perturbation import clamp_if_needed
 from noise_perturbation import project_relative_change
 from noise_perturbation import relative_change_stats
@@ -421,95 +422,6 @@ def cw_l2_attack(
     return _finalize_attack(model, x_ref, best_x_adv)
 
 
-def deepfool_attack(
-    model: torch.nn.Module,
-    x: torch.Tensor,
-    y_true: torch.Tensor,
-    *,
-    num_steps: int = 50,
-    overshoot: float = 0.02,
-    max_rel_change: Optional[float] = 0.05,
-    budget_floor: float = 0.0,
-    clamp: Optional[Tuple[float, float]] = None,
-    targeted: bool = False,
-    y_target: Optional[torch.Tensor] = None,
-) -> AttackResult:
-    """
-    多类 DeepFool（迭代线性化）：对每个样本在「真类 vs 其它类」的决策边界上取最小 L2 方向步长，
-    再乘以 ``(1 + overshoot)``，最后 ``project_relative_change``（与 FGSM/PGD/CW 一致）。
-
-    默认 **untargeted**：在所有 ``k != y_true`` 中选使一步扰动范数最小的类边界；
-    **targeted** 时只对 ``y_target`` 对应类求边界步长。
-    实现上按 batch 维逐样本前向/反传，避免错误地向量化（见 Moosavi-Dezfooli et al., DeepFool）。
-    """
-    model.eval()
-    x_ref = x.detach()
-    x_adv = x_ref.clone()
-    num_classes = int(model.head[-1].out_features)
-    if num_classes < 2:
-        return _finalize_attack(model, x_ref, x_adv)
-
-    for _ in range(int(num_steps)):
-        with torch.no_grad():
-            logits_chk = model(x_adv)
-            pred = logits_chk.argmax(dim=1)
-            if (pred != y_true).all():
-                break
-
-        delta_accum = torch.zeros_like(x_adv)
-        B = x_adv.size(0)
-        for b in range(B):
-            if not targeted and pred[b] != y_true[b]:
-                continue
-            if targeted:
-                if y_target is None:
-                    raise ValueError("targeted DeepFool 需要 y_target")
-                if pred[b] == y_target[b]:
-                    continue
-
-            yt = int(y_true[b].item())
-            if targeted:
-                assert y_target is not None
-                k_list = [int(y_target[b].item())]
-                if k_list[0] == yt:
-                    continue
-            else:
-                k_list = [k for k in range(num_classes) if k != yt]
-
-            x_b = x_adv[b : b + 1].clone().detach().requires_grad_(True)
-            lb = model(x_b)[0]
-            grad_y = torch.autograd.grad(lb[yt], x_b, retain_graph=True, create_graph=False)[0]
-
-            best_r: Optional[torch.Tensor] = None
-            best_l2_sq = float("inf")
-
-            for idx, k in enumerate(k_list):
-                last_k = idx == len(k_list) - 1
-                grad_k = torch.autograd.grad(lb[k], x_b, retain_graph=not last_k, create_graph=False)[0]
-                w = grad_k - grad_y
-                fk = (lb[k] - lb[yt]).detach()
-                denom = w.reshape(-1).dot(w.reshape(-1)).clamp_min(1e-12)
-                r_b = (fk / denom) * w
-                nsq = float(r_b.reshape(-1).dot(r_b.reshape(-1)).item())
-                if nsq < best_l2_sq:
-                    best_l2_sq = nsq
-                    best_r = r_b
-
-            if best_r is not None:
-                delta_accum[b : b + 1] = (1.0 + float(overshoot)) * best_r
-
-        x_adv = x_adv + delta_accum
-        x_adv = project_relative_change(
-            x_ref,
-            x_adv,
-            max_rel_change=max_rel_change,
-            min_scale=budget_floor,
-        )
-        x_adv = clamp_if_needed(x_adv, clamp)
-
-    return _finalize_attack(model, x_ref, x_adv)
-
-
 def build_loader(samples: List[TrackSample], batch_size: int) -> DataLoader:
     x, y = batch_tracks_to_sequences(samples)
     dataset = TensorDataset(torch.from_numpy(x), torch.from_numpy(y))
@@ -518,18 +430,12 @@ def build_loader(samples: List[TrackSample], batch_size: int) -> DataLoader:
 
 def load_model(model_path: str, device: str) -> RadarTrackTransformer:
     try:
-        try:
-            ckpt = torch.load(model_path, map_location=device, weights_only=True)
-        except TypeError:
-            ckpt = torch.load(model_path, map_location=device)
+        model = load_radar_transformer_model(model_path, device=device)
     except PermissionError as e:
         raise PermissionError(
             f"无法读取模型文件（权限拒绝）: {model_path}\n"
             "请确认路径是权重 .pth 文件本身（不要填目录）、未被其它程序占用，且不要使用文档占位符「...」。"
         ) from e
-    model = RadarTrackTransformer(input_size=ckpt["input_size"], num_classes=ckpt.get("num_classes", 6))
-    model.load_state_dict(ckpt["model_state_dict"])
-    model.to(device).eval()
     return model
 
 
@@ -581,8 +487,6 @@ def evaluate_whitebox_attack(
     pgd_momentum: float,
     attack_loss: str,
     targeted_topk: int,
-    deepfool_steps: int = 50,
-    deepfool_overshoot: float = 0.02,
 ) -> Dict[str, float]:
     y_true_all: List[int] = []
     y_pred_clean_all: List[int] = []
@@ -671,20 +575,6 @@ def evaluate_whitebox_attack(
                             random_start=True,
                         )
                     )
-                elif attack == "deepfool":
-                    untargeted_candidates.append(
-                        deepfool_attack(
-                            model,
-                            x_attack,
-                            y_attack,
-                            num_steps=deepfool_steps,
-                            overshoot=deepfool_overshoot,
-                            max_rel_change=max_rel_change,
-                            budget_floor=budget_floor,
-                            clamp=clamp,
-                            targeted=False,
-                        )
-                    )
                 else:
                     raise ValueError(f"unknown attack: {attack}")
 
@@ -735,19 +625,6 @@ def evaluate_whitebox_attack(
                             budget_floor=budget_floor,
                             clamp=clamp,
                             random_start=True,
-                        )
-                    elif attack == "deepfool":
-                        targeted_candidate = deepfool_attack(
-                            model,
-                            x_attack,
-                            y_attack,
-                            num_steps=deepfool_steps,
-                            overshoot=deepfool_overshoot,
-                            max_rel_change=max_rel_change,
-                            budget_floor=budget_floor,
-                            clamp=clamp,
-                            targeted=True,
-                            y_target=y_target,
                         )
                     else:
                         raise ValueError(f"unknown attack: {attack}")
@@ -839,14 +716,14 @@ def evaluate_whitebox_attack(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="White-box adversarial evaluation (FGSM/PGD/CW/DeepFool)")
+    parser = argparse.ArgumentParser(description="White-box adversarial evaluation (FGSM/PGD/CW)")
     parser.add_argument("--model_path", type=str, default="radar_transformer.pth")
     parser.add_argument("--batch_size", type=int, default=200)
     parser.add_argument("--device", type=str, default="cuda", help="默认 cuda；无 CUDA 回退 CPU")
     parser.add_argument("--require_gpu", action="store_true")
     parser.add_argument("--mat_test_dir", type=str, default=None, help="测试用 .mat 根目录")
     parser.add_argument("--mat_dir", type=str, default=None, help="同 --mat_test_dir")
-    parser.add_argument("--attack", type=str, default="all", choices=["all", "fgsm", "pgd", "cw", "deepfool"])
+    parser.add_argument("--attack", type=str, default="all", choices=["all", "fgsm", "pgd", "cw"])
     parser.add_argument(
         "--max_rel_change",
         type=float,
@@ -883,8 +760,6 @@ def main() -> None:
     parser.add_argument("--cw_lr", type=float, default=0.005)
     parser.add_argument("--cw_steps", type=int, default=1000)
     parser.add_argument("--cw_confidence", type=float, default=1.0)
-    parser.add_argument("--deepfool_steps", type=int, default=50, help="DeepFool 迭代步数（逐样本梯度，较慢）")
-    parser.add_argument("--deepfool_overshoot", type=float, default=0.02, help="DeepFool 步长乘以 (1+overshoot)")
     parser.add_argument(
         "--debug_grad",
         action="store_true",
@@ -940,7 +815,7 @@ def main() -> None:
             raise ValueError("clamp_min 和 clamp_max 需要同时提供，或都不提供")
         clamp = (float(args.clamp_min), float(args.clamp_max))
 
-    attacks = ["fgsm", "pgd", "cw", "deepfool"] if args.attack == "all" else [args.attack]
+    attacks = ["fgsm", "pgd", "cw"] if args.attack == "all" else [args.attack]
     print("白盒对抗攻击评估（PyTorch）:")
     for name in attacks:
         if args.debug_grad:
@@ -990,8 +865,6 @@ def main() -> None:
             pgd_momentum=float(args.pgd_momentum),
             attack_loss=str(args.attack_loss),
             targeted_topk=int(args.targeted_topk),
-            deepfool_steps=int(args.deepfool_steps),
-            deepfool_overshoot=float(args.deepfool_overshoot),
         )
         print(f"- {name}:")
         print(f"  Clean Sample Accuracy: {r['clean_sample_accuracy']:.4f}")
@@ -1027,7 +900,6 @@ def main() -> None:
 __all__ = [
     "AttackResult",
     "cw_l2_attack",
-    "deepfool_attack",
     "fgsm_attack",
     "pgd_linf_attack",
 ]

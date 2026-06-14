@@ -1,0 +1,15 @@
+{
+  "clean": {
+    "accuracy": 0.845,
+    "macro_f1": 0.8454289083790895,
+    "classification_mAP": 0.879727549283961
+  },
+  "Adversarial": {
+    "accuracy": 0.6266666666666667,
+    "macro_f1": 0.6208084261074023,
+    "classification_mAP": 0.75547534054835,
+    "mAP_retention_rate": 0.8587605800946623,
+    "attack_success_rate": 0.2583826429980276,
+    "robust_accuracy": 0.6266666666666667
+  }
+}
